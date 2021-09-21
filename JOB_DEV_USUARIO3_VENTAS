@@ -1,0 +1,46 @@
+import sys
+from awsglue.transforms import *
+from awsglue.utils import getResolvedOptions
+from pyspark.context import SparkContext
+from awsglue.context import GlueContext
+from awsglue.job import Job
+from pyspark.sql.functions import col, udf, lit
+import datetime
+from datetime import datetime
+from pyspark.sql.types import *
+
+Proyecto="VW"
+now = datetime.now()
+nows=now.strftime("%Y-%m-%d")
+
+## @params: [TempDir, JOB_NAME]
+args = getResolvedOptions(sys.argv, ['TempDir','JOB_NAME'])
+
+sc = SparkContext()
+glueContext = GlueContext(sc)
+spark = glueContext.spark_session
+job = Job(glueContext)
+job.init(args['JOB_NAME'], args)
+
+datasource0 = glueContext.create_dynamic_frame.from_catalog(database = "db_to_landing", table_name = "ventas_csv", transformation_ctx = "datasource0")
+dropnullfields0 = DropNullFields.apply(frame = datasource0, transformation_ctx = "dropnullfields0")
+
+df=dropnullfields0.toDF()
+#Especifico el Proyecto
+df = df.withColumn("proyecto",lit(Proyecto))
+df = df.withColumn("fecha",lit(nows))
+df.show(2)
+#(ESPECIFICAR EL FORMATO DE ENTRADA)
+#udf1=udf(lambda x:datetime.strptime(x, '%d/%m/%Y'), DateType())
+#df=df.withColumn('fecha_pedido', udf1('fecha_pedido'))
+df.show(2)
+#Transformo a Dynamic Frame
+from awsglue.dynamicframe import DynamicFrame
+dropnullfields0=DynamicFrame.fromDF(df, glueContext, "dropnullfields0")
+
+
+applymapping1 = ApplyMapping.apply(frame = dropnullfields0, mappings = [("id_pedido", "string", "id_pedido", "string"), ("id_material", "string", "id_material", "string"), ("id_cliente", "string", "id_cliente", "string"), ("cantidad", "double", "cantidad", "double"), ("precio_unitario", "double", "precio_unitario", "double"), ("precio_neto", "double", "precio_neto", "double"), ("fecha_pedido", "string", "fecha_pedido", "date"), ("moneda", "string", "moneda", "string"),("proyecto", "string", "proyecto", "string"),("fecha", "string", "fecha", "date")], transformation_ctx = "applymapping1")
+resolvechoice2 = ResolveChoice.apply(frame = applymapping1, choice = "make_cols", transformation_ctx = "resolvechoice2")
+dropnullfields3 = DropNullFields.apply(frame = resolvechoice2, transformation_ctx = "dropnullfields3")
+datasink4 = glueContext.write_dynamic_frame.from_jdbc_conf(frame = dropnullfields3, catalog_connection = "db_to_dscanner", connection_options = {"dbtable": "landing.lnd_ventas", "database": "dev"}, redshift_tmp_dir = args["TempDir"], transformation_ctx = "datasink4")
+job.commit()
